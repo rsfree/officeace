@@ -6,6 +6,7 @@
 
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![API](https://img.shields.io/badge/API-OpenAI%20%2F%20Anthropic-412991)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ![管理面板](docs/overview.png)
 
@@ -178,12 +179,14 @@ scripts/probe.sh             绕过网关直打上游，用于验证协议
 go build -ldflags "-X main.version=$(git describe --tags --always)" -o officeace2api .
 ```
 
-## 十、使用声明与边界
+## 十、许可与使用边界
 
-本项目是**非官方**工具，只做一件事：把你**本人**已登录的 OfficeAce 会话包装成 API，方便自己的本地工具接入。
+代码以 **MIT** 许可发布，全文见 [LICENSE](LICENSE)：可自由使用、修改、分发、商用，保留版权与许可声明即可。
 
-- **仅限本人账号自用。** 不要用于批量注册、账号交易、对外提供付费 API，或任何形式的二次分发。
-- **风险自担。** 上游接口与风控策略随时可能变更；使用非官方客户端产生的账号限制或封禁，作者不承担责任。
+但许可只覆盖**代码**，不覆盖上游服务本身：
+
+- **请只管理你本人的账号。** 批量注册、账号交易、对外转售额度都不在作者的授权意图内，由此产生的合规责任由行为人自负。
+- **风险自担。** 上游接口与风控策略随时可能变更；使用非官方客户端导致的账号限制或封禁，作者不承担任何责任。
 - **仓库不含凭证。** `data/` 已在 `.gitignore` 中排除，Release 产物里也没有任何账号信息。
 - **不做伪装。** 不改 UA、不加假指纹、不绕验证码，请求特征与官方客户端保持一致。
 - **接口变更时**：先跑 `scripts/probe.sh` 确认端点是否存活，再改 `config.json` 的 `upstream_base`。
