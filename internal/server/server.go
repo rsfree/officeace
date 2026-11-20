@@ -144,15 +144,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /panel/api/config", s.authPanel(s.panelPutConfig))
 	mux.HandleFunc("POST /panel/api/test/chat", s.authPanel(s.panelTestChat))
 
-	// 静态面板
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
+	// 静态面板 + 兜底：未注册的路径一律返回 OpenAI 风格 404，
+	// 而不是 mux 因「路径匹配但方法不符」给出的 405（那会让客户端误以为端点存在）
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write(web.Index())
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(web.Index())
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{
+			"message": "未知端点: " + r.Method + " " + r.URL.Path,
+			"type":    "invalid_request_error",
+			"code":    "unknown_endpoint",
+		}})
 	})
 
 	return s.recoverer(mux)
