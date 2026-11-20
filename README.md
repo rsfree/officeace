@@ -4,6 +4,11 @@
 
 单二进制、零外部依赖、零数据库：账号、配置、日志都在本地文件与内存里。
 
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
+![API](https://img.shields.io/badge/API-OpenAI%20%2F%20Anthropic-412991)
+
+![管理面板](docs/overview.png)
+
 ---
 
 ## 一、协议结论（实测，非猜测）
