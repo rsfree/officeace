@@ -103,6 +103,17 @@ claude
 
 `tools` / `tool_use` / `input_json_delta` 都做了双向转换，工具调用链可用（已验证 `stop_reason: tool_use` 与流式分片）。
 
+### 工具调用与缓存
+
+| 能力 | OpenAI 路径 | Anthropic 路径 |
+|---|---|---|
+| tools | 透传，实测 `finish_reason: tool_calls` | 双向转换，实测 `stop_reason: tool_use` |
+| 前缀缓存 | 原样透传 `usage.prompt_tokens_details.cached_tokens` | 映射为 `usage.cache_read_input_tokens`，`input_tokens` 只计未缓存部分 |
+
+缓存由上游自动建立，**前 1–2 次请求不会命中**（异步写入，不是即时生效）。实测一份 7.3k prompt：
+第 1 次 `cached=0`，第 3 次 `cached=7296`，耗时 4.6s → 2.0s。所以「第一次慢」是正常现象，不代表缓存失效。
+
+
 ## 四、面板
 
 - **概览**：账号健康度、请求量、成功率、token 消耗、接入地址、最近请求

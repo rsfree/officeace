@@ -272,6 +272,9 @@ type oaiResp struct {
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -305,10 +308,19 @@ func (s *Server) plainAnthropicReal(w http.ResponseWriter, resp *http.Response, 
 	if len(content) == 0 {
 		content = append(content, map[string]any{"type": "text", "text": ""})
 	}
+	cached := o.Usage.PromptTokensDetails.CachedTokens
+	uncached := o.Usage.PromptTokens - cached
+	if uncached < 0 {
+		uncached = 0
+	}
 	writeJSON(w, 200, map[string]any{
 		"id": "msg_" + o.ID, "type": "message", "role": "assistant", "model": model,
 		"content": content, "stop_reason": stop, "stop_sequence": nil,
-		"usage": map[string]any{"input_tokens": o.Usage.PromptTokens, "output_tokens": o.Usage.CompletionTokens},
+		"usage": map[string]any{
+			"input_tokens":            uncached,
+			"output_tokens":           o.Usage.CompletionTokens,
+			"cache_read_input_tokens": cached,
+		},
 	})
 	s.record(start, req, "/v1/messages", model, accID, 200, o.Usage.PromptTokens, o.Usage.CompletionTokens, 0, false, "")
 }
@@ -361,7 +373,7 @@ func (s *Server) streamAnthropic(w http.ResponseWriter, resp *http.Response, acc
 	toolIndex := -1
 	toolArgs := map[string]string{}
 	toolNames := map[string]string{}
-	promptTokens, outTokens := 0, 0
+	promptTokens, outTokens, cachedTokens := 0, 0, 0
 	finish := "end_turn"
 
 	reader := bufio.NewReaderSize(resp.Body, 64<<10)
@@ -379,7 +391,22 @@ func (s *Server) streamAnthropic(w http.ResponseWriter, resp *http.Response, acc
 					if o > 0 {
 						outTokens = o
 					}
+					var probe struct {
+						Usage struct {
+							PromptTokensDetails struct {
+								CachedTokens int `json:"cached_tokens"`
+							} `json:"prompt_tokens_details"`
+						} `json:"usage"`
+					}
+					if json.Unmarshal([]byte(payload), &probe) == nil && probe.Usage.PromptTokensDetails.CachedTokens > 0 {
+						cachedTokens = probe.Usage.PromptTokensDetails.CachedTokens
+					}
 					var chunk struct {
+						Usage struct {
+							PromptTokensDetails struct {
+								CachedTokens int `json:"cached_tokens"`
+							} `json:"prompt_tokens_details"`
+						} `json:"usage"`
 						Choices []struct {
 							Delta struct {
 								Content   string `json:"content"`
@@ -449,10 +476,18 @@ func (s *Server) streamAnthropic(w http.ResponseWriter, resp *http.Response, acc
 	if textOpen || toolIndex >= 0 {
 		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": blockIndex})
 	}
+	uncachedTokens := promptTokens - cachedTokens
+	if uncachedTokens < 0 {
+		uncachedTokens = 0
+	}
 	send("message_delta", map[string]any{
 		"type": "message_delta",
 		"delta": map[string]any{"stop_reason": finish, "stop_sequence": nil},
-		"usage": map[string]any{"output_tokens": outTokens},
+		"usage": map[string]any{
+			"input_tokens":            uncachedTokens,
+			"output_tokens":           outTokens,
+			"cache_read_input_tokens": cachedTokens,
+		},
 	})
 	send("message_stop", map[string]any{"type": "message_stop"})
 	flusher.Flush()
