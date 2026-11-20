@@ -159,7 +159,7 @@ scripts/probe.sh             绕过网关直打上游，用于验证协议
 | 图片请求 25s+ | 上游生成本身慢 | 调大 `request_timeout_sec` |
 | 流式没有 usage | 上游未返回 | 网关已注入 `stream_options.include_usage`，部分模型仍可能省略 |
 
-## 十、发布
+## 九、发布
 
 仓库：`rsfree/officeace`。**push 到 main 即自动发版**（patch 自增），workflow 在 `.github/workflows/release.yml`。
 
@@ -178,7 +178,7 @@ scripts/probe.sh             绕过网关直打上游，用于验证协议
 go build -ldflags "-X main.version=$(git describe --tags --always)" -o officeace2api .
 ```
 
-## 九、使用声明与边界
+## 十、使用声明与边界
 
 本项目是**非官方**工具，只做一件事：把你**本人**已登录的 OfficeAce 会话包装成 API，方便自己的本地工具接入。
 
