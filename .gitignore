@@ -1,0 +1,5 @@
+data/
+officeace2api
+*.log
+.DS_Store
+.workbuddy/

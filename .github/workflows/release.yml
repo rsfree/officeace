@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # workflow_dispatch 没有 head_commit，用 || '' 兜底，避免空值误判
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message || '', '[skip release]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Resolve next version
+        id: ver
+        run: |
+          set -euo pipefail
+          PREV=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)
+          BASE=${PREV:-v0.0.0}
+          IFS=. read -r MA MI PA <<< "${BASE#v}"
+          PA="${PA%%[-+]*}"
+          NEW="v${MA}.${MI}.$((PA + 1))"
+          echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
+          echo "next=${NEW}" >> "$GITHUB_OUTPUT"
+          echo "Previous: ${PREV:-<none>} -> Next: ${NEW}"
+
+      - name: Build changelog
+        id: log
+        run: |
+          set -euo pipefail
+          PREV='${{ steps.ver.outputs.prev }}'
+          if [ -z "$PREV" ]; then RANGE=HEAD; else RANGE="${PREV}..HEAD"; fi
+          {
+            echo 'body<<CHANGELOG_EOF'
+            echo '## Changes'
+            git log "$RANGE" --pretty='- %s (%h)' --no-merges --max-count=50 || echo '- Initial release'
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build cross-platform binaries into dist/
+        env:
+          VERSION: ${{ steps.ver.outputs.next }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${target%%/*}
+            GOARCH=${target##*/}
+            EXT=''
+            [ "$GOOS" = windows ] && EXT='.exe'
+            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/officeace2api-${GOOS}-${GOARCH}${EXT}" \
+              .
+          done
+
+      - name: Verify artifacts
+        run: |
+          set -euo pipefail
+          [ -n "$(ls -A dist)" ] || { echo "::error::dist/ is empty"; exit 1; }
+          ls -la dist
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Create tag
+        env:
+          TAG: ${{ steps.ver.outputs.next }}
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            echo "::error::tag ${TAG} already exists on origin"; exit 1
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.next }}
+          NOTES: ${{ steps.log.outputs.body }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists -- skipping creation"
+            exit 0
+          fi
+          printf '%s\n' "$NOTES" > /tmp/notes.md
+          gh release create "$TAG" --title "Release $TAG" --notes-file /tmp/notes.md dist/*
+
+      - name: Move latest tag
+        env:
+          TAG: ${{ steps.ver.outputs.next }}
+        run: |
+          set -euo pipefail
+          git tag -f latest "$TAG"
+          git push -f origin latest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ steps.ver.outputs.next }}
+          path: dist/
+          retention-days: 30

@@ -1,0 +1,42 @@
+{
+  "listen": "127.0.0.1:8787",
+  "api_key": "sk-REPLACE_WITH_YOUR_KEY",
+  "panel_key": "pk-REPLACE_WITH_YOUR_KEY",
+  "upstream_base": "https://xiaohuanxiong.com/api/web/llm/v2",
+  "image_endpoint": "https://xiaohuanxiong.com/api/web/llm/v2/images/gen",
+  "default_model": "sn-kimi-k3",
+  "models": [
+    {
+      "id": "sn-kimi-k3",
+      "label": "Kimi K3",
+      "kind": "chat",
+      "enabled": true
+    },
+    {
+      "id": "sn-deepseek-v4-1-flash-1017",
+      "label": "DeepSeek V4 Flash",
+      "kind": "chat",
+      "enabled": true
+    },
+    {
+      "id": "sn-image",
+      "label": "图像生成",
+      "kind": "image",
+      "enabled": true
+    }
+  ],
+  "sync_local": true,
+  "local_auth_paths": [
+    "~/Library/Application Support/office-raccoon/agent/config/auth.json",
+    "~/Library/Application Support/*/agent/config/auth.json",
+    "~/Library/Application Support/*/auth.json"
+  ],
+  "sync_interval_sec": 30,
+  "max_retries": 2,
+  "cooldown_rate_limit_sec": 60,
+  "cooldown_error_sec": 30,
+  "sticky_ttl_sec": 1800,
+  "request_timeout_sec": 600,
+  "log_capacity": 500,
+  "upstream_always_stream": false
+}
