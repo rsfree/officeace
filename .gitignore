@@ -3,3 +3,5 @@ officeace2api
 *.log
 .DS_Store
 .workbuddy/
+deploy/*/config.json
+deploy/*/data/

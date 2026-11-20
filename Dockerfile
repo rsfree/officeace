@@ -3,7 +3,11 @@ FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/officeace2api .
+# 版本号由构建方注入，保证 /healthz 能自证跑了哪个版本
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION}" \
+    -o /out/officeace2api .
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata

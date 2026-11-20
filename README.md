@@ -160,7 +160,53 @@ scripts/probe.sh             绕过网关直打上游，用于验证协议
 | 图片请求 25s+ | 上游生成本身慢 | 调大 `request_timeout_sec` |
 | 流式没有 usage | 上游未返回 | 网关已注入 `stream_options.include_usage`，部分模型仍可能省略 |
 
-## 九、发布
+## 九、自托管部署
+
+单机 Docker 即可，最小 compose：
+
+```yaml
+services:
+  officeace2api:
+    image: officeace2api:0.0.4
+    container_name: officeace2api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:39055:8787"     # 只绑回环，公网走 nginx
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+```
+
+### 反代三条硬要求
+
+| 项 | 值 | 为什么 |
+|---|---|---|
+| `proxy_buffering` | `off` | 开着会把 SSE 整段攒到最后才吐，流式直接失效 |
+| `proxy_read_timeout` | `3600s` | 长对话与图片生成（实测 10–30s）留足余量 |
+| `client_max_body_size` | `32m` | 图像 edits 的 base64 body |
+
+### 服务器上没有客户端怎么办
+
+本项目的凭证来自**本机登录态**。部署到远端机器时要手动搬：
+
+```bash
+scp data/accounts.json root@<host>:/opt/officeace2api/data/accounts.json
+```
+
+代价是**失去自动续期**——token 到期后要重新登录客户端、再搬一次。长期跑在服务器上建议把
+`sync_local` 关掉（扫不到文件，留着只会空转），并把「更新凭证」写进运维例程。
+
+### 模型会漂移
+
+上游模型池是动态的。`sn-kimi-k3` 已在 2026-11-21 下线（`400 param model unsupport`，
+本地与境外机器同时复现，与部署无关）。面板「模型」页可随时关掉失效项；排查时先在**本地**
+直连上游试同一模型，能区分「上游下线」和「部署问题」。
+
+`sn-deepseek-v4-1-flash-1017` 是推理模型，`max_tokens` 太小会把额度全用在 `reasoning_content`
+上、`content` 为空 —— 客户端建议 ≥ 400。
+
+## 十、发布
 
 仓库：`rsfree/officeace`。**push 到 main 即自动发版**（patch 自增），workflow 在 `.github/workflows/release.yml`。
 
@@ -179,7 +225,7 @@ scripts/probe.sh             绕过网关直打上游，用于验证协议
 go build -ldflags "-X main.version=$(git describe --tags --always)" -o officeace2api .
 ```
 
-## 十、许可与使用边界
+## 十一、许可与使用边界
 
 代码以 **MIT** 许可发布，全文见 [LICENSE](LICENSE)：可自由使用、修改、分发、商用，保留版权与许可声明即可。
 

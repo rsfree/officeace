@@ -1,0 +1,18 @@
+services:
+  officeace2api:
+    image: officeace2api:0.0.4
+    container_name: officeace2api
+    restart: unless-stopped
+    ports:
+      # 只绑回环，公网入口走 nginx + https
+      - "127.0.0.1:39055:8787"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
