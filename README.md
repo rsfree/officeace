@@ -154,6 +154,25 @@ scripts/probe.sh             绕过网关直打上游，用于验证协议
 | 图片请求 25s+ | 上游生成本身慢 | 调大 `request_timeout_sec` |
 | 流式没有 usage | 上游未返回 | 网关已注入 `stream_options.include_usage`，部分模型仍可能省略 |
 
+## 十、发布
+
+仓库：`rsfree/officeace`。**push 到 main 即自动发版**（patch 自增），workflow 在 `.github/workflows/release.yml`。
+
+| 环节 | 行为 |
+|---|---|
+| 版本号 | 取最新 `v*.*.*` tag 的 patch +1；零 tag 时从 `v0.0.1` 起 |
+| 构建 | `linux/amd64`、`linux/arm64`、`darwin/amd64`、`darwin/arm64`、`windows/amd64`，`-X main.version` 注入版本 |
+| 冒烟 | 用 linux 产物起一次服务，断言 `/healthz` 的 `version` 与本次 tag 一致，不过不发版 |
+| 产物 | Release 附件 5 个二进制 + `SHA256SUMS`，同时移动 `latest` 指针 |
+| 跳过 | commit message 含 `[skip release]`（该字面量匹配整条 message，别在“描述它”的提交里写） |
+| 手动补跑 | Actions → Release → Run workflow |
+
+本地构建想带版本号：
+
+```bash
+go build -ldflags "-X main.version=$(git describe --tags --always)" -o officeace2api .
+```
+
 ## 九、边界
 
 - 仅供**本人账号**自用；不要用于批量注册、转售额度或对外提供付费服务。
