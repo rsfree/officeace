@@ -658,6 +658,7 @@ async function loadModels() {
       + (isDefault ? '<span class="badge">默认</span>' : '') + '</div><div class="bd">'
       + '<div class="field"><label>对外模型名</label><div class="mono">' + esc(m.id) + '</div></div>'
       + '<div class="field"><label>上游模型名</label><div class="mono muted">' + esc(m.upstream || m.id) + '</div></div>'
+      + ((m.aliases && m.aliases.length) ? '<div class="field"><label>别名</label><div class="mono muted">' + esc(m.aliases.join(', ')) + '</div></div>' : '')
       + '<div class="field"><label>类型</label><div>' + ((m.kind||'chat') === 'image' ? '图像生成' : '对话') + '</div></div>'
       + '<div class="actions" style="justify-content:flex-end">'
       + ((m.kind||'chat') === 'chat' ? '<button class="btn sm" data-mdef="' + esc(m.id) + '">设为默认</button>' : '')
@@ -699,11 +700,13 @@ function modelForm(m) {
   return '<div class="field"><label>对外模型名</label><input id="mfId" value="' + esc(m.id||'') + '" placeholder="my-kimi"></div>'
     + '<div class="field"><label>上游模型名</label><input id="mfUp" value="' + esc(m.upstream||'') + '" placeholder="sn-kimi-k3"></div>'
     + '<div class="field"><label>展示名</label><input id="mfLabel" value="' + esc(m.label||'') + '" placeholder="Kimi K3"></div>'
-    + '<div class="field"><label>类型</label><select id="mfKind"><option value="chat"' + ((m.kind||'chat')==='chat'?' selected':'') + '>对话</option><option value="image"' + (m.kind==='image'?' selected':'') + '>图像</option></select></div>';
+    + '<div class="field"><label>类型</label><select id="mfKind"><option value="chat"' + ((m.kind||'chat')==='chat'?' selected':'') + '>对话</option><option value="image"' + (m.kind==='image'?' selected':'') + '>图像</option></select></div>'
+    + '<div class="field"><label>别名（逗号分隔，支持 * 通配）</label><input id="mfAlias" value="' + esc((m.aliases||[]).join(', ')) + '" placeholder="dall-e-3, gpt-image-*, flux"></div>';
 }
 function readModelForm() {
   const id = $('mfId').value.trim();
-  return { id, upstream: $('mfUp').value.trim() || id, label: $('mfLabel').value.trim(), kind: $('mfKind').value, enabled: true };
+  const aliases = $('mfAlias').value.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+  return { id, upstream: $('mfUp').value.trim() || id, label: $('mfLabel').value.trim(), kind: $('mfKind').value, enabled: true, aliases };
 }
 
 /* ---------- 日志 ---------- */

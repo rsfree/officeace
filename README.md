@@ -147,6 +147,23 @@ POST /v1/images/generations
 第 1 次 `cached=0`，第 3 次 `cached=7296`，耗时 4.6s → 2.0s。所以「第一次慢」是正常现象，不代表缓存失效。
 
 
+### 模型别名与重定向
+
+客户端硬编码的模型名（`dall-e-3`、`gpt-4o`、`claude-3-5-sonnet`）不必改代码——在面板「模型」页
+给某个条目填别名即可，支持 `*` 通配：
+
+| 对外名 | 别名 | 实际落到 |
+|---|---|---|
+| `sn-image` | `dall-e-3`, `gpt-image-1`, `gpt-image-2`, `flux*`, `sdxl` | `sn-image` |
+| `sn-deepseek-v4-1-flash-1017` | `gpt-4o`, `gpt-4o-mini`, `deepseek-chat`, `claude-3-5-sonnet*` | 上游同名 |
+
+匹配优先级：**ID 精确 > 别名精确 > 别名通配**。
+
+- 精确别名会出现在 `/v1/models` 里，`owned_by` 标为 `alias:<真实ID>`；
+- 通配符（`flux*`）只影响路由，**不列进模型列表**——它不是具体模型名；
+- 别名冲突时以 models 数组里靠前的条目为准。
+
+
 ## 四、面板
 
 - **概览**：账号健康度、请求量、成功率、token 消耗、接入地址、最近请求

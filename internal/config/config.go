@@ -13,11 +13,15 @@ import (
 
 // Model 描述一个对外暴露的模型。
 type Model struct {
-	ID       string `json:"id"`                 // 对外模型名，如 sn-kimi-k3
-	Upstream string `json:"upstream,omitempty"` // 上游模型名，缺省同 ID
-	Label    string `json:"label,omitempty"`    // 面板展示名
-	Kind     string `json:"kind,omitempty"`     // chat | image
-	Enabled  bool   `json:"enabled"`
+	ID       string   `json:"id"`                 // 对外模型名，如 sn-kimi-k3
+	Upstream string   `json:"upstream,omitempty"` // 上游模型名，缺省同 ID
+	Label    string   `json:"label,omitempty"`    // 面板展示名
+	Kind     string   `json:"kind,omitempty"`     // chat | image
+	Enabled  bool     `json:"enabled"`
+	// Aliases 让同一个上游模型可被多个名字命中（重定向）。
+	// 支持通配：`gpt-image-*`、`claude-3-*`。匹配优先级：ID > 精确别名 > 通配别名。
+	// 用途：客户端硬编码的模型名（dall-e-3 / gpt-4o / claude-3-5-sonnet）无需改代码即可落到本网关上。
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // Config 是全部可热更新的运行参数。

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -29,20 +30,50 @@ func readBody(r *http.Request) ([]byte, error) {
 // resolveModel 把对外模型名映射到上游模型名与类型。
 func (s *Server) resolveModel(id string) (string, string, bool) {
 	cfg := s.cfg.Get()
+	pick := func(m config.Model) (string, string) {
+		up := m.Upstream
+		if up == "" {
+			up = m.ID
+		}
+		kind := m.Kind
+		if kind == "" {
+			kind = "chat"
+		}
+		return up, kind
+	}
+
+	// 1) 精确命中 ID（最快路径，也是唯一保证不被别名覆盖的）
+	for _, m := range cfg.Models {
+		if m.Enabled && m.ID == id {
+			up, kind := pick(m)
+			return up, kind, true
+		}
+	}
+	// 2) 精确命中别名
 	for _, m := range cfg.Models {
 		if !m.Enabled {
 			continue
 		}
-		if m.ID == id {
-			up := m.Upstream
-			if up == "" {
-				up = m.ID
+		for _, a := range m.Aliases {
+			if a == id {
+				up, kind := pick(m)
+				return up, kind, true
 			}
-			kind := m.Kind
-			if kind == "" {
-				kind = "chat"
+		}
+	}
+	// 3) 通配别名（gpt-image-* 之类）。放在最后，避免抢走精确匹配。
+	for _, m := range cfg.Models {
+		if !m.Enabled {
+			continue
+		}
+		for _, a := range m.Aliases {
+			if !strings.Contains(a, "*") {
+				continue
 			}
-			return up, kind, true
+			if ok, err := path.Match(a, id); err == nil && ok {
+				up, kind := pick(m)
+				return up, kind, true
+			}
 		}
 	}
 	return "", "", false
@@ -307,6 +338,16 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		data = append(data, map[string]any{
 			"id": m.ID, "object": "model", "owned_by": "officeace", "created": 0,
 		})
+		// 别名也列出来，客户端才能在模型下拉里看到它们；
+		// 通配符不是具体模型名，不列。
+		for _, a := range m.Aliases {
+			if strings.Contains(a, "*") {
+				continue
+			}
+			data = append(data, map[string]any{
+				"id": a, "object": "model", "owned_by": "alias:" + m.ID, "created": 0,
+			})
+		}
 	}
 	writeJSON(w, 200, map[string]any{"object": "list", "data": data})
 }
