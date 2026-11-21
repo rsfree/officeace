@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -44,10 +45,34 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	if e.Message != "" {
-		return fmt.Sprintf("upstream %d: %s (%s)", e.Status, e.Message, e.Details)
+	msg, details := Sanitize(e.Message), Sanitize(e.Details)
+	if msg != "" {
+		if details != "" {
+			return fmt.Sprintf("upstream %d: %s (%s)", e.Status, msg, details)
+		}
+		return fmt.Sprintf("upstream %d: %s", e.Status, msg)
 	}
-	return fmt.Sprintf("upstream %d: %s", e.Status, truncate(e.Raw, 200))
+	return fmt.Sprintf("upstream %d: %s", e.Status, Sanitize(truncate(e.Raw, 200)))
+}
+
+// 上游实现细节一律不外泄：内部模型代号、LiteLLM 路由与 fallback 说明都属于内部架构。
+var (
+	reInternalCode = regexp.MustCompile(`(?i)raccoon[-_a-zA-Z0-9.]*`)
+	reLiteLLMNoise = regexp.MustCompile(`(?s)\s*LiteLLM:.*$`)
+	reSpaces       = regexp.MustCompile(`\s{2,}`)
+)
+
+// Sanitize 抹掉上游错误信息里的内部实现细节，供所有对外错误出口复用：
+//   - raccoon-* 内部模型代号 → gpt-image
+//   - "LiteLLM: model group ... fallbacks ..." 整段丢弃
+func Sanitize(s string) string {
+	if s == "" {
+		return s
+	}
+	s = reLiteLLMNoise.ReplaceAllString(s, "")
+	s = reInternalCode.ReplaceAllString(s, "gpt-image")
+	s = reSpaces.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
 }
 
 // IsAuth 判断是否为凭证失效。
@@ -93,7 +118,7 @@ func parseErrorBody(raw []byte) (int, string, string) {
 	if msg == "" {
 		msg = truncate(strings.TrimSpace(s), 200)
 	}
-	return code, msg, details
+	return code, Sanitize(msg), Sanitize(details)
 }
 
 func jsonInt(s, key string) int {

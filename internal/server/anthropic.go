@@ -134,7 +134,7 @@ func (s *Server) handleAnthropic(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		cool, reason := upstream.Classify(ue.Status, ue.Code)
 		s.pool.Release(acc.ID, ue.Status, 0, 0, reason, cool)
-		writeJSON(w, ue.Status, map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": ue.Message}})
+		writeJSON(w, ue.Status, map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": upstream.Sanitize(ue.Message)}})
 		return
 	}
 	if req.Stream {

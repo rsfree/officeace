@@ -5,3 +5,6 @@ officeace2api
 .workbuddy/
 deploy/*/config.json
 deploy/*/data/
+out/
+__pycache__/
+*.pyc
