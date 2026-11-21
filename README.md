@@ -103,6 +103,39 @@ claude
 
 `tools` / `tool_use` / `input_json_delta` 都做了双向转换，工具调用链可用（已验证 `stop_reason: tool_use` 与流式分片）。
 
+### 图生图 / 多图垫图
+
+**同一个端点**，靠 `image` 字段的存在性分流：不传 → 文生图；传 → 图生图。
+
+```json
+POST /v1/images/generations
+{
+  "model": "sn-image",
+  "prompt": "把圆形改成紫色，保持高光",
+  "image": "data:image/png;base64,iVBORw0..."   // 或 ["...","..."]
+}
+```
+
+`image` 只接受**字符串引用**（这是契约地基，永远不收文件流），三种写法都认：
+
+| 载体 | 例子 | 网关行为 |
+|---|---|---|
+| 公网地址 | `https://example.com/a.png` | 下载后内联（30s 超时，禁用内网地址） |
+| data URI | `data:image/png;base64,iVBOR…` | 直接解码 |
+| 裸 base64 | `iVBORw0KGgo…` | 补 mime 后解码 |
+
+| 限制 | 值 |
+|---|---|
+| 最多垫图 | **16 张**（上游上限，实测 16 张正常） |
+| 单张大小 | 10 MB |
+| 合计大小 | 40 MB |
+| 每张消耗 | 1024 image tokens |
+
+⚠️ **两层限制的区别**：上游的 `/images/edits` 只收 multipart 文件流，传 URL 字符串会被 422 拒绝
+（`Expected UploadFile, received: <class 'str'>`）。本网关在内部做载体转换，所以**对外支持 URL**，
+但那个 URL 是网关自己去下载的——SSRF 白名单（回环/私网/链路本地一律拒绝）与大小上限都在这层。
+
+
 ### 工具调用与缓存
 
 | 能力 | OpenAI 路径 | Anthropic 路径 |

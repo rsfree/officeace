@@ -2,8 +2,11 @@ package server
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"net/http"
 
 	"officeace2api/internal/account"
+	"officeace2api/internal/config"
 	"officeace2api/internal/upstream"
 )
 
@@ -332,15 +336,18 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, oaiErr("模型 "+modelID+" 不是图像模型"))
 		return
 	}
+
+	// canonical 契约：image 是字符串引用或引用数组，代表垫图。
+	// 没有它 → 文生图；有 → 图生图。同一个端点，靠字段存在性分流。
+	refs, refErr := ParseImageRefs(body["image"])
+	if refErr != nil {
+		writeJSON(w, 400, oaiBadRequest(refErr.Error()))
+		return
+	}
+	delete(body, "image") // 上游不吃该字段，引用已单独解析为字节
 	body["model"] = upModel
-	out, _ := json.Marshal(body)
 
 	cfg := s.cfg.Get()
-	endpoint := cfg.ImageEndpoint
-	if endpoint == "" {
-		endpoint = strings.TrimRight(cfg.UpstreamBase, "/") + "/images/gen"
-	}
-
 	acc, err := s.pool.Pick("", map[string]bool{})
 	if err != nil {
 		writeJSON(w, 503, oaiErr(err.Error()))
@@ -348,7 +355,24 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := timeoutCtx(r, time.Duration(cfg.RequestTimeout)*time.Second)
 	defer cancel()
-	resp, err := s.up.Post(ctx, endpoint, acc.Token, out)
+
+	var resp *http.Response
+	if len(refs) > 0 {
+		blobs, loadErr := s.loadImageRefs(ctx, refs)
+		if loadErr != nil {
+			s.pool.Release(acc.ID, 0, 0, 0, "", 0)
+			writeJSON(w, 400, oaiBadRequest(loadErr.Error()))
+			return
+		}
+		resp, err = s.postImageEdit(ctx, cfg, acc.Token, body, blobs)
+	} else {
+		endpoint := cfg.ImageEndpoint
+		if endpoint == "" {
+			endpoint = strings.TrimRight(cfg.UpstreamBase, "/") + "/images/gen"
+		}
+		out, _ := json.Marshal(body)
+		resp, err = s.up.Post(ctx, endpoint, acc.Token, out)
+	}
 	if err != nil {
 		s.pool.Release(acc.ID, 0, 0, 0, "连接失败", 10*time.Second)
 		writeJSON(w, 502, oaiErr("上游连接失败: "+err.Error()))
@@ -381,10 +405,58 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 		promptTok, outTok = meta.Usage.InputTokens, meta.Usage.OutputTokens
 	}
 	s.pool.Release(acc.ID, 200, promptTok, outTok, "", 0)
+	// 成功体理论上不含内部代号，仍做一次低成本守卫，避免上游改版后漏出。
+	if bytes.Contains(bytes.ToLower(data), []byte("raccoon")) {
+		data = []byte(upstream.Sanitize(string(data)))
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	_, _ = w.Write(data)
 	s.record(start, r, "/v1/images/generations", modelID, acc.ID, 200, promptTok, outTok, 0, false, "")
+}
+
+// loadImageRefs 把 canonical 的字符串引用统一取成字节，并守住总量上限。
+func (s *Server) loadImageRefs(ctx context.Context, refs []string) ([]*imageBlob, error) {
+	blobs := make([]*imageBlob, 0, len(refs))
+	total := 0
+	for i, ref := range refs {
+		blob, err := LoadImageRef(ctx, ref)
+		if err != nil {
+			return nil, errors.New("image[" + strconv.Itoa(i) + "]: " + err.Error())
+		}
+		total += len(blob.Data)
+		if total > maxTotalRefs {
+			return nil, errors.New("垫图合计超过 " + strconv.Itoa(maxTotalRefs>>20) + " MB")
+		}
+		blobs = append(blobs, blob)
+	}
+	return blobs, nil
+}
+
+// postImageEdit 反向适配：上游只收 multipart 文件流，这里把已取到的字节组装成表单。
+func (s *Server) postImageEdit(ctx context.Context, cfg config.Config, token string, body map[string]any, blobs []*imageBlob) (*http.Response, error) {
+	fields := map[string]string{"model": fmt.Sprint(body["model"])}
+	for _, k := range []string{"prompt", "n", "size", "quality"} {
+		if v, ok := body[k]; ok && v != nil {
+			fields[k] = fmt.Sprint(v)
+		}
+	}
+	if strings.TrimSpace(fields["prompt"]) == "" {
+		fields["prompt"] = "按参考图生成图片"
+	}
+	form, contentType, err := BuildImageEditForm(fields, blobs)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := strings.TrimRight(cfg.UpstreamBase, "/") + "/images/edits"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, form)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", contentType)
+	client := &http.Client{}
+	return client.Do(req)
 }
 
 func (s *Server) record(start time.Time, r *http.Request, path, model, accID string, status, prompt, out int, ttfb int64, stream bool, errMsg string) {
@@ -411,6 +483,17 @@ func (s *Server) record(start time.Time, r *http.Request, path, model, accID str
 	})
 }
 
+// oaiBadRequest 用于「调用方字段/引用不合法」的归因：400 + invalid_request_error。
+// 不能复用 oaiErr —— 那会把客户端错误标成 upstream_error，让调用方去排查上游。
+func oaiBadRequest(msg string) map[string]any {
+	return map[string]any{"error": map[string]any{
+		"message": upstream.Sanitize(msg),
+		"type":    "invalid_request_error",
+		"code":    "invalid_image_reference",
+	}}
+}
+
 func oaiErr(msg string) map[string]any {
-	return map[string]any{"error": map[string]any{"message": msg, "type": "upstream_error"}}
+	// 兜底：任何来源的错误文本都不允许带出上游内部代号（raccoon-* / LiteLLM）。
+	return map[string]any{"error": map[string]any{"message": upstream.Sanitize(msg), "type": "upstream_error"}}
 }
