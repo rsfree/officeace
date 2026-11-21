@@ -28,6 +28,22 @@ func readBody(r *http.Request) ([]byte, error) {
 }
 
 // resolveModel 把对外模型名映射到上游模型名与类型。
+// defaultUpstreamOfKind 取某类型下第一个启用条目的上游名。
+// 用于「端点优先」的兜底：客户端传了个不该出现在这个端点上的模型名时，
+// 用该端点的默认模型接住，而不是把错误的名字转给上游。
+func (s *Server) defaultUpstreamOfKind(kind, fallback string) string {
+	cfg := s.cfg.Get()
+	for _, m := range cfg.Models {
+		if m.Enabled && m.Kind == kind {
+			if m.Upstream != "" {
+				return m.Upstream
+			}
+			return m.ID
+		}
+	}
+	return fallback
+}
+
 func (s *Server) resolveModel(id string) (string, string, bool) {
 	cfg := s.cfg.Get()
 	pick := func(m config.Model) (string, string) {
@@ -368,14 +384,12 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 	if modelID == "" {
 		modelID = "sn-image"
 	}
+	// 端点优先：走到 /v1/images/generations 就是出图，model 只是「用哪个上游模型」。
+	// 因此不按 kind 做准入 —— 名字没指向图片模型（未注册 / 注册成 chat）时，
+	// 回落到默认图片模型，而不是把 chat 模型名发给图片端点（那必然上游 400）。
 	upModel, kind, ok := s.resolveModel(modelID)
-	if !ok {
-		// 允许直接传未注册的上游模型名
-		upModel, kind = modelID, "image"
-	}
-	if kind != "image" {
-		writeJSON(w, 400, oaiErr("模型 "+modelID+" 不是图像模型"))
-		return
+	if !ok || kind != "image" {
+		upModel = s.defaultUpstreamOfKind("image", modelID)
 	}
 
 	// canonical 契约：image 是字符串引用或引用数组，代表垫图。
