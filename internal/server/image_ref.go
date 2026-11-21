@@ -73,6 +73,25 @@ func isBlockedIP(ip net.IP) bool {
 	return false
 }
 
+// maxImageRefs 单次请求允许的垫图张数。
+//
+// 上游并没有明确的"张数"上限（实测 995 张极小图仍返回 200），真正的闸是两条：
+//   - 图像 token 预算约 5.7 万：1024×1536 约 37 张、512×768 约 81 张，
+//     超了上游不报错，而是丢掉全部参考图照常出图（见 imageRefsDropped）；
+//   - 网关自己的 maxTotalRefs=40MB：1024×1536 的 PNG 约 36 张。
+//
+// 取 32 是两条闸的共同安全区：32×1536=49,152 token、32×1.1MB≈35MB。
+const maxImageRefs = 32
+
+// clampImageRefs 收口张数上限 —— []any 与 []string 两条路径必须同一规则，
+// 否则绕过 JSON 解码的调用可以无限塞图，直到上游把垫图全丢掉。
+func clampImageRefs(refs []string) ([]string, error) {
+	if len(refs) > maxImageRefs {
+		return nil, fmt.Errorf("image 最多 %d 张（上游按图像 token 计费，1024×1536 实测约 37 张封顶，超出会被静默丢弃）", maxImageRefs)
+	}
+	return refs, nil
+}
+
 // ParseImageRefs 从请求体取出 image 字段：string 或 []string。
 // 返回 nil 表示没有图（文生图）；单元素数组保持数组语义，不压成标量。
 func ParseImageRefs(v any) ([]string, error) {
@@ -96,15 +115,12 @@ func ParseImageRefs(v any) ([]string, error) {
 			}
 			out = append(out, s)
 		}
-		if len(out) > 16 {
-			return nil, errors.New("image 最多 16 张（上游上限）")
-		}
-		return out, nil
+		return clampImageRefs(out)
 	case []string:
 		if len(t) == 0 {
 			return nil, nil
 		}
-		return t, nil
+		return clampImageRefs(t)
 	default:
 		return nil, errors.New("image 必须是字符串或字符串数组")
 	}
