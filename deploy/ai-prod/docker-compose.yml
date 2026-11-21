@@ -1,6 +1,6 @@
 services:
   officeace2api:
-    image: officeace2api:0.0.4
+    image: officeace2api:0.0.10
     container_name: officeace2api
     restart: unless-stopped
     ports:
