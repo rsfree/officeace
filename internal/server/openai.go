@@ -450,16 +450,21 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 	}
 	// 图片接口的用量在响应顶层 usage 里，字段名与 chat 不同（input_tokens / output_tokens）。
 	var meta struct {
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage imageUsage `json:"usage"`
 	}
 	promptTok, outTok := 0, 0
 	if json.Unmarshal(data, &meta) == nil {
 		promptTok, outTok = meta.Usage.InputTokens, meta.Usage.OutputTokens
 	}
 	s.pool.Release(acc.ID, 200, promptTok, outTok, "", 0)
+	// 垫图被静默丢弃：图是拿到了，但它一张参考图都没看 —— 对调用方来说是错的产物。
+	// 宁可显式失败，也不能把这张图当成"按你的垫图生成"透传出去。
+	if imageRefsDropped(len(refs), meta.Usage.InputTokensDetails.ImageTokens) {
+		msg := "上游未使用任何垫图（image_tokens=0），参考图疑似总 token 超出预算被静默丢弃；请减少参考图数量或降低分辨率后重试"
+		s.record(start, r, "/v1/images/generations", modelID, acc.ID, 502, promptTok, outTok, 0, false, msg)
+		writeJSON(w, 502, oaiErrCode(msg, "image_refs_dropped"))
+		return
+	}
 	// 成功体理论上不含内部代号，仍做一次低成本守卫，避免上游改版后漏出。
 	if bytes.Contains(bytes.ToLower(data), []byte("raccoon")) {
 		data = []byte(upstream.Sanitize(string(data)))
@@ -538,6 +543,25 @@ func (s *Server) record(start time.Time, r *http.Request, path, model, accID str
 	})
 }
 
+// imageUsage 是图片端点 usage 的子集。
+// input_tokens_details.image_tokens 是唯一能证明"垫图真的被模型吃掉"的字段：
+// 上游在垫图总 token 超出预算时不会报错，而是丢弃全部参考图、照常返回 200，
+// 此时该字段归零。用 *int 才能把"字段缺失"与"明确为 0"分开。
+type imageUsage struct {
+	InputTokens        int `json:"input_tokens"`
+	OutputTokens       int `json:"output_tokens"`
+	InputTokensDetails struct {
+		ImageTokens *int `json:"image_tokens"`
+	} `json:"input_tokens_details"`
+}
+
+// imageRefsDropped 判定上游是否吞掉了垫图。
+// 只在「带了垫图」且「上游明确上报 image_tokens=0」时成立；
+// 字段缺失（nil）不算 —— 避免上游改版去掉该字段后，把正常请求全判成失败。
+func imageRefsDropped(refCount int, imageTokens *int) bool {
+	return refCount > 0 && imageTokens != nil && *imageTokens == 0
+}
+
 // oaiBadRequest 用于「调用方字段/引用不合法」的归因：400 + invalid_request_error。
 // 不能复用 oaiErr —— 那会把客户端错误标成 upstream_error，让调用方去排查上游。
 func oaiBadRequest(msg string) map[string]any {
@@ -551,4 +575,14 @@ func oaiBadRequest(msg string) map[string]any {
 func oaiErr(msg string) map[string]any {
 	// 兜底：任何来源的错误文本都不允许带出上游内部代号（raccoon-* / LiteLLM）。
 	return map[string]any{"error": map[string]any{"message": upstream.Sanitize(msg), "type": "upstream_error"}}
+}
+
+// oaiErrCode 用于需要让调用方按 code 分支处理的失败（如垫图被丢弃）。
+// 与 oaiErr 同样过一遍脱敏，避免错误文本带出上游内部代号。
+func oaiErrCode(msg, code string) map[string]any {
+	return map[string]any{"error": map[string]any{
+		"message": upstream.Sanitize(msg),
+		"type":    "upstream_error",
+		"code":    code,
+	}}
 }
