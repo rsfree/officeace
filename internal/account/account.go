@@ -107,6 +107,8 @@ type sticky struct {
 type Pool struct {
 	mu       sync.RWMutex
 	path     string
+	// AllowOpaque 允许非 JWT 的不透明凭据（如 Basic 的 app_key:secret），到期时间记 0 = 永不过期。
+	AllowOpaque bool
 	accounts map[string]*Account
 	runtime  map[string]*Runtime
 	sticky   map[string]sticky
@@ -157,7 +159,11 @@ func (p *Pool) Add(token, note, source, identity string) (AddResult, error) {
 	}
 	claims, err := ParseToken(token)
 	if err != nil {
-		return AddResult{}, err
+		if !p.AllowOpaque {
+			return AddResult{}, err
+		}
+		// 不透明凭据：无法解析出 sub / exp，用指纹当 id，到期时间 0 表示永不过期。
+		claims = Claims{}
 	}
 	id := claims.Sub
 	if id == "" {
@@ -269,7 +275,7 @@ func (p *Pool) List() []View {
 		switch {
 		case a.Disabled:
 			cp.State = "disabled"
-		case a.ExpiresAt <= now:
+		case a.ExpiresAt > 0 && a.ExpiresAt <= now:
 			cp.State = "expired"
 		case cp.CooldownTill > now:
 			cp.State = "cooling"
@@ -391,7 +397,7 @@ func (p *Pool) usableLocked(a *Account, now int64) bool {
 	if a.Disabled || a.Token == "" {
 		return false
 	}
-	if a.ExpiresAt <= now+30 {
+	if a.ExpiresAt > 0 && a.ExpiresAt <= now+30 {
 		return false
 	}
 	rt := p.runtime[a.ID]

@@ -43,6 +43,8 @@ type Config struct {
 	RequestTimeout int      `json:"request_timeout_sec"`
 	LogCapacity    int      `json:"log_capacity"`
 	UpstreamStream bool     `json:"upstream_always_stream"`
+	// UpstreamAuth 上游鉴权方式：bearer（默认，小浣熊 IAM JWT）| basic（OfficeAce app_key:secret）
+	UpstreamAuth string `json:"upstream_auth"`
 }
 
 type Manager struct {
@@ -63,6 +65,7 @@ func Default() Config {
 		Listen:        "127.0.0.1:8787",
 		APIKey:        "sk-" + randomHex(16),
 		PanelKey:      "pk-" + randomHex(12),
+		UpstreamAuth:  "bearer",
 		UpstreamBase:  "https://xiaohuanxiong.com/api/web/llm/v2",
 		ImageEndpoint: "https://xiaohuanxiong.com/api/web/llm/v2/images/gen",
 		DefaultModel:  "sn-kimi-k3",
@@ -107,6 +110,9 @@ func normalize(c Config, def Config) Config {
 	}
 	if c.PanelKey == "" {
 		c.PanelKey = def.PanelKey
+	}
+	if c.UpstreamAuth == "" {
+		c.UpstreamAuth = def.UpstreamAuth
 	}
 	if c.UpstreamBase == "" {
 		c.UpstreamBase = def.UpstreamBase

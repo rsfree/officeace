@@ -144,7 +144,7 @@ func (s *Server) panelCheckAccount(w http.ResponseWriter, r *http.Request) {
 	})
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", token, payload)
+	resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", token, payload, cfg.UpstreamAuth)
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -278,6 +278,7 @@ type cfgPatch struct {
 	RequestTimeout *int          `json:"request_timeout_sec"`
 	SyncInterval   *int          `json:"sync_interval_sec"`
 	UpstreamBase   *string       `json:"upstream_base"`
+	UpstreamAuth   *string       `json:"upstream_auth"`
 	APIKey         *string       `json:"api_key"`
 	PanelKey       *string       `json:"panel_key"`
 }
@@ -322,6 +323,9 @@ func (s *Server) panelPutConfig(w http.ResponseWriter, r *http.Request) {
 		if p.UpstreamBase != nil && *p.UpstreamBase != "" {
 			c.UpstreamBase = strings.TrimRight(*p.UpstreamBase, "/")
 		}
+		if p.UpstreamAuth != nil && (*p.UpstreamAuth == "basic" || *p.UpstreamAuth == "bearer") {
+			c.UpstreamAuth = *p.UpstreamAuth
+		}
 		if p.APIKey != nil && len(*p.APIKey) >= 8 {
 			c.APIKey = *p.APIKey
 		}
@@ -333,6 +337,8 @@ func (s *Server) panelPutConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]any{"error": err.Error()})
 		return
 	}
+	// 配置变了要同步账号准入：切到 basic 才允许不透明凭据。
+	s.pool.AllowOpaque = cfg.UpstreamAuth == upstream.AuthBasic
 	writeJSON(w, 200, cfg)
 }
 
@@ -373,7 +379,7 @@ func (s *Server) panelTestChat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
 	start := time.Now()
-	resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", acc.Token, payload)
+	resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", acc.Token, payload, cfg.UpstreamAuth)
 	if err != nil {
 		s.pool.Release(acc.ID, 0, 0, 0, err.Error(), 10*time.Second)
 		writeJSON(w, 502, map[string]any{"error": err.Error()})

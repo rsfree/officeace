@@ -4,6 +4,7 @@ package upstream
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
+)
+
+// 上游鉴权方式。
+const (
+	AuthBearer = "bearer" // 小浣熊 IAM JWT，Authorization: Bearer <token>
+	AuthBasic  = "basic"  // OfficeAce 模型网关，Authorization: Basic base64(app_key:app_secret)
 )
 
 // Client 是上游 HTTP 客户端。
@@ -86,14 +93,18 @@ func (e *Error) IsRateLimit() bool {
 }
 
 // Post 发起 JSON POST，返回原始响应。调用方负责关闭 Body。
-func (c *Client) Post(ctx context.Context, endpoint, token string, body []byte) (*http.Response, error) {
+func (c *Client) Post(ctx context.Context, endpoint, token string, body []byte, authMode string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("Authorization", "Bearer "+strings.TrimPrefix(token, "Bearer "))
+	if authMode == AuthBasic {
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(token)))
+	} else {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimPrefix(token, "Bearer "))
+	}
 	req.Header.Set("User-Agent", "officeace2api/1.0")
 	return c.http.Do(req)
 }

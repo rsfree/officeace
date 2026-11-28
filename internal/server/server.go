@@ -102,6 +102,8 @@ type Server struct {
 
 // New 构造 Server。
 func New(cfg *config.Manager, pool *account.Pool) *Server {
+	// Basic 认证的上游用不透明凭据（app_key:secret），不是 JWT，需要放开账号准入。
+	pool.AllowOpaque = cfg.Get().UpstreamAuth == upstream.AuthBasic
 	return &Server{
 		cfg:     cfg,
 		pool:    pool,

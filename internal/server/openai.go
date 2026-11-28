@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -168,7 +170,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		exclude[acc.ID] = true
 
 		ctx, cancel := timeoutCtx(r, time.Duration(cfg.RequestTimeout)*time.Second)
-		resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", acc.Token, out)
+		resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", acc.Token, out, cfg.UpstreamAuth)
 		if err != nil {
 			cancel()
 			s.pool.Release(acc.ID, 0, 0, 0, "连接失败: "+err.Error(), 10*time.Second)
@@ -426,7 +428,7 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 			endpoint = strings.TrimRight(cfg.UpstreamBase, "/") + "/images/gen"
 		}
 		out, _ := json.Marshal(body)
-		resp, err = s.up.Post(ctx, endpoint, acc.Token, out)
+		resp, err = s.up.Post(ctx, endpoint, acc.Token, out, cfg.UpstreamAuth)
 	}
 	if err != nil {
 		s.pool.Release(acc.ID, 0, 0, 0, "连接失败", 10*time.Second)
@@ -469,6 +471,9 @@ func (s *Server) handleImages(w http.ResponseWriter, r *http.Request) {
 	if bytes.Contains(bytes.ToLower(data), []byte("raccoon")) {
 		data = []byte(upstream.Sanitize(string(data)))
 	}
+	// 有的上游（如 OfficeAce 模型网关）在 b64_json 里塞 data URI，
+	// OpenAI 约定是裸 base64 —— 剥掉前缀，否则客户端解不出来。
+	data = stripB64DataURI(data)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	_, _ = w.Write(data)
@@ -513,7 +518,11 @@ func (s *Server) postImageEdit(ctx context.Context, cfg config.Config, token str
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if cfg.UpstreamAuth == upstream.AuthBasic {
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(token)))
+	} else {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Content-Type", contentType)
 	client := &http.Client{}
 	return client.Do(req)
@@ -585,4 +594,15 @@ func oaiErrCode(msg, code string) map[string]any {
 		"type":    "upstream_error",
 		"code":    code,
 	}}
+}
+
+// b64DataURIRe 匹配 b64_json 值里的 data URI 前缀。
+var b64DataURIRe = regexp.MustCompile(`("b64_json"\s*:\s*")data:[^;"]*;base64,`)
+
+// stripB64DataURI 把上游返回的 data URI 还原成 OpenAI 约定的裸 base64。
+func stripB64DataURI(raw []byte) []byte {
+	if !bytes.Contains(raw, []byte("data:image/")) {
+		return raw
+	}
+	return b64DataURIRe.ReplaceAll(raw, []byte("$1"))
 }

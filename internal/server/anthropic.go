@@ -122,7 +122,7 @@ func (s *Server) handleAnthropic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := timeoutCtx(r, time.Duration(cfg.RequestTimeout)*time.Second)
-	resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", acc.Token, out)
+	resp, err := s.up.Post(ctx, strings.TrimRight(cfg.UpstreamBase, "/")+"/chat/completions", acc.Token, out, cfg.UpstreamAuth)
 	if err != nil {
 		cancel()
 		s.pool.Release(acc.ID, 0, 0, 0, err.Error(), 10*time.Second)
